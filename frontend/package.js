@@ -1,0 +1,11 @@
+{
+  "name": "video-platform-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
