@@ -1,0 +1,41 @@
+name: Backend CD (Deploy to Azure App Service)
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-cd.yml"
+
+jobs:
+  build-test-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install backend deps
+        working-directory: backend
+        run: npm ci || npm install
+
+      - name: Run backend tests
+        working-directory: backend
+        run: npm test
+
+      - name: Create deploy zip
+        working-directory: backend
+        run: |
+          zip -r backend.zip . -x "**/node_modules/**" -x "**/.env"
+
+      - name: Deploy to Azure Web App
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: "video-api-nosa123"
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: "backend/backend.zip"
