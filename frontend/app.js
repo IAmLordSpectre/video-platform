@@ -1,292 +1,300 @@
-// app.js
+// ======================
+// CONFIG
+// ======================
+const API_BASE_URL = "https://video-api-nosa123-djdxcag4e3aubaba.spaincentral-01.azurewebsites.net/"; // change only if your URL differs
 
-// ---------------- DOM ----------------
-const apiBaseInput = document.getElementById("apiBaseUrl");
-const titleInput = document.getElementById("videoTitle");
-const fileInput = document.getElementById("videoFile");
-const generateButton = document.getElementById("generateButton");
+// ======================
+// DOM
+// ======================
+const elTitle = document.getElementById("title");
+const elFile = document.getElementById("file");
+const elBtnUpload = document.getElementById("btnUpload");
+const elBtnRefresh = document.getElementById("btnRefresh");
+const elStatusText = document.getElementById("statusText");
+const elStatusHint = document.getElementById("statusHint");
+const elProgressBar = document.getElementById("progressBar");
+const elVideos = document.getElementById("videos");
+const elTpl = document.getElementById("videoItemTemplate");
+const elSearch = document.getElementById("search");
+const elBackendUrlText = document.getElementById("backendUrlText");
 
-const statusBox = document.getElementById("statusBox");
-const statusText = document.getElementById("statusText");
+elBackendUrlText.textContent = API_BASE_URL;
 
-const videoTableBody = document.getElementById("videoTableBody");
+// ======================
+// STATE
+// ======================
+let cachedVideos = [];
 
-// ---------------- Helpers ----------------
-function setStatus(message, type = "info") {
-  statusText.textContent = message || "";
+// ======================
+// HELPERS
+// ======================
+function setStatus(text, hint = "", progress = null) {
+  elStatusText.textContent = text;
+  elStatusHint.textContent = hint || "";
+  if (progress !== null) {
+    elProgressBar.style.width = `${Math.max(0, Math.min(100, progress))}%`;
+  }
+}
 
-  statusBox.classList.remove("status-info", "status-error", "status-success");
+function safeJsonParse(text) {
+  try { return JSON.parse(text); } catch { return null; }
+}
 
-  if (!message) {
-    statusBox.style.display = "none";
+function formatDate(iso) {
+  if (!iso) return "Unknown time";
+  const d = new Date(iso);
+  return d.toLocaleString();
+}
+
+function matchesSearch(v, q) {
+  if (!q) return true;
+  const hay = `${v.title || ""} ${v.id || ""}`.toLowerCase();
+  return hay.includes(q.toLowerCase());
+}
+
+// ======================
+// API CALLS
+// ======================
+async function apiUploadRequest(title, fileName) {
+  const res = await fetch(`${API_BASE_URL}/upload-request`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title, fileName })
+  });
+
+  const text = await res.text();
+  const data = safeJsonParse(text);
+
+  if (!res.ok) {
+    throw new Error(data?.error || text || `Upload request failed (${res.status})`);
+  }
+
+  return data;
+}
+
+async function apiConfirmUpload(fileName, title) {
+  const res = await fetch(`${API_BASE_URL}/confirm-upload`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fileName, title })
+  });
+
+  const text = await res.text();
+  const data = safeJsonParse(text);
+
+  if (!res.ok) {
+    throw new Error(data?.error || text || `Confirm upload failed (${res.status})`);
+  }
+
+  return data;
+}
+
+async function apiListVideos() {
+  const res = await fetch(`${API_BASE_URL}/videos`, { method: "GET" });
+  const text = await res.text();
+  const data = safeJsonParse(text);
+
+  if (!res.ok) {
+    throw new Error(data?.error || text || `List videos failed (${res.status})`);
+  }
+
+  return data;
+}
+
+async function apiGetDownloadUrl(fileName) {
+  const res = await fetch(`${API_BASE_URL}/videos/${encodeURIComponent(fileName)}/download`, { method: "GET" });
+  const text = await res.text();
+  const data = safeJsonParse(text);
+
+  if (!res.ok) {
+    throw new Error(data?.error || text || `Download link failed (${res.status})`);
+  }
+
+  return data;
+}
+
+async function apiDeleteVideo(fileName) {
+  const res = await fetch(`${API_BASE_URL}/videos/${encodeURIComponent(fileName)}`, { method: "DELETE" });
+  const text = await res.text();
+  const data = safeJsonParse(text);
+
+  if (!res.ok) {
+    throw new Error(data?.error || text || `Delete failed (${res.status})`);
+  }
+
+  return data;
+}
+
+// ======================
+// SAS UPLOAD (PUT to Blob)
+// ======================
+async function uploadToSasUrl(sasUrl, file) {
+  // Use XMLHttpRequest to get upload progress
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", sasUrl, true);
+
+    // Required header for Azure Block Blob uploads
+    xhr.setRequestHeader("x-ms-blob-type", "BlockBlob");
+    xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+
+    xhr.upload.onprogress = (evt) => {
+      if (evt.lengthComputable) {
+        const pct = Math.round((evt.loaded / evt.total) * 100);
+        setStatus("Uploading to storage...", "Uploading the file to Azure Blob Storage using SAS...", pct);
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) resolve();
+      else reject(new Error(`Blob upload failed (${xhr.status}): ${xhr.responseText}`));
+    };
+
+    xhr.onerror = () => reject(new Error("Network error during blob upload"));
+
+    xhr.send(file);
+  });
+}
+
+// ======================
+// RENDER
+// ======================
+function renderVideos() {
+  const q = elSearch.value.trim();
+  elVideos.innerHTML = "";
+
+  const list = cachedVideos.filter(v => matchesSearch(v, q));
+
+  if (!list.length) {
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.textContent = "No videos found.";
+    elVideos.appendChild(empty);
     return;
   }
 
-  if (type === "error") statusBox.classList.add("status-error");
-  else if (type === "success") statusBox.classList.add("status-success");
-  else statusBox.classList.add("status-info");
+  for (const v of list) {
+    const node = elTpl.content.cloneNode(true);
+    const item = node.querySelector(".video-item");
+    const title = node.querySelector(".video-title");
+    const sub = node.querySelector(".video-sub");
+    const tag = node.querySelector(".tag");
 
-  statusBox.style.display = "block";
-}
+    const btnDownload = node.querySelector(".btnDownload");
+    const btnDelete = node.querySelector(".btnDelete");
 
-function getApiBaseUrl() {
-  const raw = apiBaseInput.value.trim();
-  if (!raw) {
-    throw new Error("Please enter your API Base URL.");
-  }
-  return raw.replace(/\/+$/, "");
-}
+    title.textContent = v.title || "(Untitled)";
+    sub.textContent = `File: ${v.id} • Uploaded: ${formatDate(v.uploadTime)} • Status: ${v.status || "unknown"}`;
+    tag.textContent = v.status || "unknown";
 
-function safeText(value) {
-  if (value === null || value === undefined) return "";
-  return String(value);
-}
+    btnDownload.addEventListener("click", async () => {
+      try {
+        btnDownload.disabled = true;
+        setStatus("Generating download link...", "Requesting a read-only SAS URL from the backend...", null);
 
-// ---------------- Load list ----------------
-async function loadVideoList() {
-  try {
-    const baseUrl = getApiBaseUrl();
-    setStatus("Loading videos...", "info");
+        const data = await apiGetDownloadUrl(v.id);
+        const url = data.downloadUrl;
 
-    const res = await fetch(`${baseUrl}/videos`);
-    if (!res.ok) {
-      throw new Error(`Failed to fetch videos (HTTP ${res.status})`);
-    }
+        // Open download link
+        window.open(url, "_blank", "noopener,noreferrer");
+        setStatus("Download link generated", "A new tab should open with the SAS URL.", 100);
+        setTimeout(() => setStatus("Idle", "Ready.", 0), 800);
+      } catch (err) {
+        console.error(err);
+        setStatus("Download failed", err.message, 0);
+      } finally {
+        btnDownload.disabled = false;
+      }
+    });
 
-    const videos = await res.json();
+    btnDelete.addEventListener("click", async () => {
+      const ok = confirm(`Delete "${v.title}" (${v.id})?\n\nThis will remove blob + metadata.`);
+      if (!ok) return;
 
-    videoTableBody.innerHTML = "";
+      try {
+        btnDelete.disabled = true;
+        setStatus("Deleting...", "Deleting blob and metadata via backend...", null);
+        await apiDeleteVideo(v.id);
+        setStatus("Deleted", "Refreshing list...", 100);
+        await refreshList();
+        setTimeout(() => setStatus("Idle", "Ready.", 0), 800);
+      } catch (err) {
+        console.error(err);
+        setStatus("Delete failed", err.message, 0);
+      } finally {
+        btnDelete.disabled = false;
+      }
+    });
 
-    if (!Array.isArray(videos) || videos.length === 0) {
-      const row = document.createElement("tr");
-      const cell = document.createElement("td");
-      cell.colSpan = 5;
-      cell.textContent = "No videos found yet.";
-      row.appendChild(cell);
-      videoTableBody.appendChild(row);
-      setStatus("", "info");
-      return;
-    }
-
-    for (const vid of videos) {
-      const id = vid.id || vid.fileName || "";
-      const title = vid.title || "(untitled)";
-      const uploadTime = vid.uploadTime ? new Date(vid.uploadTime).toLocaleString() : "-";
-      const status = vid.status || "-";
-
-      const row = document.createElement("tr");
-
-      // Title
-      const titleCell = document.createElement("td");
-      titleCell.textContent = title;
-
-      // File / ID
-      const idCell = document.createElement("td");
-      idCell.textContent = id;
-
-      // Upload Time
-      const timeCell = document.createElement("td");
-      timeCell.textContent = uploadTime;
-
-      // Status
-      const statusCell = document.createElement("td");
-      statusCell.textContent = status;
-
-      // Actions
-      const actionsCell = document.createElement("td");
-
-      const watchBtn = document.createElement("button");
-      watchBtn.className = "btn-secondary";
-      watchBtn.textContent = "Watch/Download";
-      watchBtn.disabled = !id;
-      watchBtn.addEventListener("click", () => watchOrDownload(id));
-
-      const deleteBtn = document.createElement("button");
-      deleteBtn.className = "btn-danger";
-      deleteBtn.textContent = "Delete";
-      deleteBtn.disabled = !id;
-      deleteBtn.addEventListener("click", () => deleteVideo(id));
-
-      actionsCell.appendChild(watchBtn);
-      actionsCell.appendChild(document.createTextNode(" "));
-      actionsCell.appendChild(deleteBtn);
-
-      row.appendChild(titleCell);
-      row.appendChild(idCell);
-      row.appendChild(timeCell);
-      row.appendChild(statusCell);
-      row.appendChild(actionsCell);
-
-      videoTableBody.appendChild(row);
-    }
-
-    setStatus("", "info");
-  } catch (err) {
-    console.error(err);
-    setStatus(`Could not load videos: ${err.message}`, "error");
+    elVideos.appendChild(item);
   }
 }
 
-// ---------------- Step A Feature 1: Watch/Download ----------------
-// Uses backend: GET /videos/:id/download
-async function watchOrDownload(id) {
-  try {
-    if (!id) return;
-
-    const baseUrl = getApiBaseUrl();
-    setStatus(`Creating secure link for: ${id}`, "info");
-
-    const res = await fetch(`${baseUrl}/videos/${encodeURIComponent(id)}/download`);
-    if (!res.ok) {
-      let msg = `Failed to create download link (HTTP ${res.status})`;
-      try {
-        const body = await res.json();
-        if (body?.error) msg += ` – ${body.error}`;
-      } catch {}
-      throw new Error(msg);
-    }
-
-    const body = await res.json();
-    const downloadUrl = body.downloadUrl;
-
-    if (!downloadUrl) {
-      throw new Error("Backend did not return a downloadUrl.");
-    }
-
-    setStatus("Opening download/watch link in a new tab (time-limited SAS).", "success");
-    window.open(downloadUrl, "_blank");
-  } catch (err) {
-    console.error(err);
-    setStatus(`Watch/Download failed: ${err.message}`, "error");
-  }
+// ======================
+// MAIN ACTIONS
+// ======================
+async function refreshList() {
+  setStatus("Loading videos...", "Fetching metadata from Cosmos DB...", null);
+  cachedVideos = await apiListVideos();
+  renderVideos();
+  setStatus("Idle", `Loaded ${cachedVideos.length} videos.`, 0);
 }
 
-// ---------------- Step A Feature 2: Delete ----------------
-// Uses backend: DELETE /videos/:id
-async function deleteVideo(id) {
-  try {
-    if (!id) return;
+async function handleUpload() {
+  const title = elTitle.value.trim();
+  const file = elFile.files?.[0];
 
-    const confirmed = window.confirm(
-      `Delete "${id}"?\n\nThis will remove the blob from storage and delete the metadata record.`
-    );
-    if (!confirmed) return;
-
-    const baseUrl = getApiBaseUrl();
-    setStatus(`Deleting video: ${id}`, "info");
-
-    const res = await fetch(`${baseUrl}/videos/${encodeURIComponent(id)}`, {
-      method: "DELETE"
-    });
-
-    if (!res.ok) {
-      let msg = `Delete failed (HTTP ${res.status})`;
-      try {
-        const body = await res.json();
-        if (body?.error) msg += ` – ${body.error}`;
-      } catch {}
-      throw new Error(msg);
-    }
-
-    setStatus(`Deleted: ${id}`, "success");
-    await loadVideoList();
-  } catch (err) {
-    console.error(err);
-    setStatus(`Delete failed: ${err.message}`, "error");
+  if (!title) {
+    setStatus("Missing title", "Enter a title before uploading.", 0);
+    return;
   }
-}
+  if (!file) {
+    setStatus("Missing file", "Choose a video file before uploading.", 0);
+    return;
+  }
 
-// ---------------- Upload flow ----------------
-async function handleUploadClick(event) {
-  event.preventDefault();
+  // Keep filename stable and safe
+  const fileName = file.name;
 
   try {
-    generateButton.disabled = true;
+    elBtnUpload.disabled = true;
+    setStatus("Requesting upload URL...", "Calling backend to generate a write SAS URL...", 0);
 
-    const baseUrl = getApiBaseUrl();
-    const title = titleInput.value.trim();
-    const file = fileInput.files[0];
+    // 1) Get SAS upload URL + initial metadata write
+    const { uploadUrl } = await apiUploadRequest(title, fileName);
 
-    if (!title) throw new Error("Please enter a video title.");
-    if (!file) throw new Error("Please choose a video file.");
+    // 2) Upload file directly to Blob Storage using SAS URL
+    setStatus("Uploading to storage...", "Uploading the file to Azure Blob Storage using SAS...", 5);
+    await uploadToSasUrl(uploadUrl, file);
 
-    const fileName = file.name;
+    // 3) Confirm upload (so list reflects real uploads)
+    setStatus("Confirming upload...", "Updating Cosmos metadata status to 'uploaded'...", 95);
+    await apiConfirmUpload(fileName, title);
 
-    // 1) Request upload SAS
-    setStatus("Requesting upload URL...", "info");
+    // 4) Refresh list
+    setStatus("Refreshing list...", "Updating UI from Cosmos DB...", 98);
+    await refreshList();
 
-    const sasRes = await fetch(`${baseUrl}/upload-request`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, fileName })
-    });
-
-    if (!sasRes.ok) {
-      let msg = `upload-request failed (HTTP ${sasRes.status})`;
-      try {
-        const body = await sasRes.json();
-        if (body?.error) msg += ` – ${body.error}`;
-      } catch {}
-      throw new Error(msg);
-    }
-
-    const sasBody = await sasRes.json();
-    const uploadUrl = sasBody.uploadUrl;
-
-    if (!uploadUrl) throw new Error("Backend did not return uploadUrl.");
-
-    // 2) Upload to Blob using SAS
-    setStatus("Uploading video to storage...", "info");
-
-    const putRes = await fetch(uploadUrl, {
-      method: "PUT",
-      headers: {
-        "x-ms-blob-type": "BlockBlob",
-        "Content-Type": file.type || "application/octet-stream"
-      },
-      body: file
-    });
-
-    if (!putRes.ok) {
-      throw new Error(`Blob upload failed (HTTP ${putRes.status}).`);
-    }
-
-    // 3) Confirm upload (backend accepts fileName OR id)
-    setStatus("Confirming upload...", "info");
-
-    const confirmRes = await fetch(`${baseUrl}/confirm-upload`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: fileName }) // your backend now supports this
-    });
-
-    if (!confirmRes.ok) {
-      let msg = `confirm-upload failed (HTTP ${confirmRes.status})`;
-      try {
-        const body = await confirmRes.json();
-        if (body?.error) msg += ` – ${body.error}`;
-      } catch {}
-      throw new Error(msg);
-    }
-
-    setStatus("Upload complete. Refreshing list...", "success");
-    await loadVideoList();
+    setStatus("Upload complete", "Video uploaded and metadata updated.", 100);
+    setTimeout(() => setStatus("Idle", "Ready.", 0), 1000);
   } catch (err) {
     console.error(err);
-    setStatus(`Upload failed: ${err.message}`, "error");
+    setStatus("Upload failed", err.message, 0);
   } finally {
-    generateButton.disabled = false;
+    elBtnUpload.disabled = false;
   }
 }
 
-// ---------------- Events ----------------
-generateButton.addEventListener("click", handleUploadClick);
+// ======================
+// EVENTS
+// ======================
+elBtnUpload.addEventListener("click", handleUpload);
+elBtnRefresh.addEventListener("click", refreshList);
+elSearch.addEventListener("input", renderVideos);
 
-apiBaseInput.addEventListener("change", () => {
-  if (apiBaseInput.value.trim()) loadVideoList();
+// Initial load
+setStatus("Idle", "Ready.", 0);
+refreshList().catch(err => {
+  console.error(err);
+  setStatus("Backend unreachable", err.message, 0);
 });
-
-// Initial load (if pre-filled)
-try {
-  if (apiBaseInput.value.trim()) loadVideoList();
-} catch {}

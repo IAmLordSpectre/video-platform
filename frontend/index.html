@@ -1,114 +1,85 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8" />
-    <title>Video Upload Platform – Demo</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="stylesheet" href="styles.css" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Video Platform</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-<div class="page">
-
+  <div class="app">
     <header class="header">
-        <h1>Video Upload Platform</h1>
-        <p class="subtitle">Azure Blob Storage + Cosmos DB (COM769 Demo)</p>
+      <div>
+        <h1>Video Platform</h1>
+        <p class="muted">Upload, list, download, and delete videos (Blob + Cosmos)</p>
+      </div>
+      <div class="badge">Frontend</div>
     </header>
 
-    <main class="layout">
+    <section class="card">
+      <h2>1) Upload Video</h2>
 
-        <!-- LEFT COLUMN: API + Upload -->
-        <section class="column">
+      <div class="grid">
+        <div class="field">
+          <label for="title">Title</label>
+          <input id="title" type="text" placeholder="e.g., Intro Demo Video" />
+        </div>
 
-            <!-- API configuration -->
-            <div class="card">
-                <h2>1. API Configuration</h2>
+        <div class="field">
+          <label for="file">Choose file</label>
+          <input id="file" type="file" accept="video/*" />
+        </div>
+      </div>
 
-                <label class="field-label" for="apiBaseUrl">API Base URL</label>
-                <input
-                    id="apiBaseUrl"
-                    class="text-input"
-                    type="text"
-                    placeholder="https://video-api-nosa123-djdxcag4e3aubaba.spaincentral-01.azurewebsites.net"
-                />
+      <div class="actions">
+        <button id="btnUpload" class="primary">Request Upload + Upload File</button>
+        <button id="btnRefresh" class="secondary">Refresh List</button>
+      </div>
 
-                <p class="hint">
-                    Paste the URL of your Node.js API here. The frontend uses this for all requests.
-                </p>
+      <div class="status">
+        <div class="status-row">
+          <span class="status-label">Status</span>
+          <span id="statusText" class="status-text">Idle</span>
+        </div>
+        <div class="progress-wrap">
+          <div id="progressBar" class="progress-bar" style="width:0%"></div>
+        </div>
+        <small id="statusHint" class="muted">Tip: Large files may take time; keep this tab open.</small>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>2) Videos</h2>
+        <div class="card-tools">
+          <input id="search" type="text" placeholder="Search by title or filename..." />
+        </div>
+      </div>
+
+      <div id="videos" class="videos"></div>
+
+      <template id="videoItemTemplate">
+        <div class="video-item">
+          <div class="video-meta">
+            <div class="video-title"></div>
+            <div class="video-sub muted"></div>
+            <div class="video-tags">
+              <span class="tag"></span>
             </div>
+          </div>
+          <div class="video-actions">
+            <button class="secondary btnDownload">Download</button>
+            <button class="danger btnDelete">Delete</button>
+          </div>
+        </div>
+      </template>
+    </section>
 
-            <!-- Upload form -->
-            <div class="card">
-                <h2>2. Request SAS & Upload Video</h2>
-
-                <label class="field-label" for="videoTitle">Video Title</label>
-                <input
-                    id="videoTitle"
-                    class="text-input"
-                    type="text"
-                    placeholder="e.g. Product Demo, Course Intro"
-                />
-
-                <label class="field-label" for="videoFile">Select Video File</label>
-                <input
-                    id="videoFile"
-                    class="file-input"
-                    type="file"
-                    accept="video/*"
-                />
-
-                <button id="generateButton" class="primary-btn">
-                    Generate SAS &amp; Upload
-                </button>
-
-                <div id="statusBox" class="status-box status-info" style="display:none;">
-                    <span id="statusText"></span>
-                </div>
-
-                <p class="hint">
-                    Behind the scenes this will:
-                    <br />1) Call <code>/upload-request</code> to get a SAS URL
-                    <br />2) Upload the file directly to Blob Storage
-                    <br />3) Call <code>/confirm-upload</code> to update Cosmos DB
-                </p>
-            </div>
-
-        </section>
-
-        <!-- RIGHT COLUMN: Video List -->
-        <section class="column">
-
-            <div class="card">
-                <h2>3. Stored Videos (Cosmos DB)</h2>
-
-                <table class="video-table">
-                    <thead>
-                    <tr>
-                        <th>Title</th>
-                        <th>File Name / ID</th>
-                        <th>Uploaded</th>
-                        <th>Status</th>
-                    </tr>
-                    </thead>
-                    <tbody id="videoTableBody">
-                    <!-- Populated by app.js -->
-                    </tbody>
-                </table>
-
-                <p class="hint">
-                    This table is populated by a call to <code>GET /videos</code> on your API.
-                </p>
-            </div>
-
-        </section>
-
-    </main>
-
-    <footer class="footer">
-        <span>COM769 Mini Project &middot; Azure-based Video Platform</span>
+    <footer class="footer muted">
+      <div>Backend: <span id="backendUrlText"></span></div>
     </footer>
+  </div>
 
-</div>
-
-<script src="app.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
